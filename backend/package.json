@@ -1,0 +1,14 @@
+{
+  "name": "mqtt-smart-campus-backend",
+  "version": "1.0.0",
+  "description": "Backend publishers and automation controller for MQTT Smart Campus Facility Management",
+  "main": "publishers.js",
+  "scripts": {
+    "publishers": "node publishers.js",
+    "controller": "node controller.js",
+    "start": "node publishers.js & node controller.js"
+  },
+  "dependencies": {
+    "mqtt": "^5.10.0"
+  }
+}
