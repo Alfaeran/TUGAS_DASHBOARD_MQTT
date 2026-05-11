@@ -28,7 +28,7 @@ let currentLampStatus = "OFF";
 let autoControlEnabled = true;
 
 const client = mqtt.connect(BROKER_URL, {
-  protocolVersion: 4,
+  protocolVersion: 5,
   clientId: "auto-controller-" + Math.random().toString(16).slice(2, 8),
   clean: true,
   connectTimeout: 10000,

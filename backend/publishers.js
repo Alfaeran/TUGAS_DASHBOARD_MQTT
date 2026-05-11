@@ -16,9 +16,9 @@ const TOPICS = {
   LAMP_STATUS: "campus/room1/status/lamp",
   AC_STATUS: "campus/room1/status/ac",
   ENERGY: "campus/room1/energy/usage",
-  // Control topics (subscribed by publishers to receive commands)
   LAMP_CONTROL: "campus/room1/control/lamp",
   AC_CONTROL: "campus/room1/control/ac",
+  POWER_REQUEST: "campus/room1/request/power",
 };
 
 // ---- LWT Topics ----
@@ -34,12 +34,13 @@ let acStatus = "OFF";
 
 // =============================================================
 // ROLE 1: Environment Sensor
-// Publishes temperature and light intensity every 5 seconds
-// QoS 0 (fire-and-forget)
 // =============================================================
 function startEnvironmentSensor() {
   const client = mqtt.connect(BROKER_URL, {
-    protocolVersion: 4,
+    protocolVersion: 5, // [Feature 10] Must be MQTT 5
+    properties: {
+      receiveMaximum: 10, // [Feature 10] Flow Control: limit concurrent QoS 1/2 messages
+    },
     clientId: "env-sensor-" + Math.random().toString(16).slice(2, 8),
     clean: true,
     connectTimeout: 10000,
@@ -52,14 +53,13 @@ function startEnvironmentSensor() {
         timestamp: new Date().toISOString(),
       }),
       qos: 1,
-      retain: true,
+      retain: true, // [Feature 7] LWT with Retain
     },
   });
 
   client.on("connect", () => {
-    console.log("[ENV-SENSOR] Connected to broker");
+    console.log("[ENV-SENSOR] Connected to broker (MQTT 5)");
 
-    // Publish online status to clear any previous LWT
     client.publish(
       LWT_TOPICS.SENSOR,
       JSON.stringify({
@@ -70,10 +70,12 @@ function startEnvironmentSensor() {
       { qos: 1, retain: true }
     );
 
-    // Publish sensor data every 5 seconds
+    // [Feature 3] Topic Alias: Use aliases to save bandwidth
+    let isFirstPublish = true;
+
     setInterval(() => {
-      const temperature = parseFloat((20 + Math.random() * 15).toFixed(1)); // 20-35°C
-      const light = Math.floor(Math.random() * 500); // 0-500 Lux
+      const temperature = parseFloat((20 + Math.random() * 15).toFixed(1));
+      const light = Math.floor(Math.random() * 500);
 
       const tempPayload = JSON.stringify({
         value: temperature,
@@ -87,82 +89,69 @@ function startEnvironmentSensor() {
         timestamp: new Date().toISOString(),
       });
 
-      client.publish(TOPICS.TEMP, tempPayload, { qos: 0 });
-      client.publish(TOPICS.LIGHT, lightPayload, { qos: 0 });
+      // Properties for MQTT 5 publish
+      const publishProps = {
+        messageExpiryInterval: 10, // [Feature 6] Expiry: discard stale data after 10s
+        userProperties: {          // [Feature 4] User Properties: Attach metadata
+          "sensor-model": "DHT22",
+          "location": "Room 1",
+        },
+      };
 
-      console.log(
-        `[ENV-SENSOR] Temp: ${temperature}°C | Light: ${light} Lux`
+      // [Feature 1] Pub/Sub & QoS: Publish with QoS 0
+      client.publish(
+        isFirstPublish ? TOPICS.TEMP : "", // [Feature 3] Empty topic string if alias is established
+        tempPayload,
+        { 
+          qos: 0, 
+          properties: { ...publishProps, topicAlias: 1 } // [Feature 3] Topic Alias 1
+        }
       );
+
+      client.publish(
+        isFirstPublish ? TOPICS.LIGHT : "", // [Feature 3]
+        lightPayload,
+        { 
+          qos: 0, 
+          properties: { ...publishProps, topicAlias: 2 } // [Feature 3] Topic Alias 2
+        }
+      );
+
+      isFirstPublish = false;
+      console.log(`[ENV-SENSOR] Temp: ${temperature}°C | Light: ${light} Lux`);
     }, 5000);
   });
 
-  client.on("error", (err) => {
-    console.error("[ENV-SENSOR] Connection error:", err.message);
-  });
-
-  client.on("reconnect", () => {
-    console.log("[ENV-SENSOR] Attempting reconnection...");
-  });
-
-  client.on("offline", () => {
-    console.log("[ENV-SENSOR] Client went offline");
-  });
-
+  client.on("error", (err) => console.error("[ENV-SENSOR] Error:", err.message));
   return client;
 }
 
 // =============================================================
 // ROLE 2: Device Status Tracker
-// Publishes Lamp and AC status with Retained Messages = true
-// Listens to control topics for toggle commands
 // =============================================================
 function startDeviceStatusTracker() {
   const client = mqtt.connect(BROKER_URL, {
-    protocolVersion: 4,
+    protocolVersion: 5,
+    properties: { receiveMaximum: 10 }, // [Feature 10] Flow Control
     clientId: "device-tracker-" + Math.random().toString(16).slice(2, 8),
     clean: true,
-    connectTimeout: 10000,
-    reconnectPeriod: 5000,
     will: {
       topic: LWT_TOPICS.DEVICE_TRACKER,
-      payload: JSON.stringify({
-        status: "offline",
-        message: "Device Status Tracker Offline",
-        timestamp: new Date().toISOString(),
-      }),
+      payload: JSON.stringify({ status: "offline", message: "Device Status Tracker Offline", timestamp: new Date().toISOString() }),
       qos: 1,
-      retain: true,
+      retain: true, // [Feature 7] LWT
     },
   });
 
   client.on("connect", () => {
-    console.log("[DEVICE-TRACKER] Connected to broker");
-
-    // Publish online status
+    console.log("[DEVICE-TRACKER] Connected to broker (MQTT 5)");
     client.publish(
       LWT_TOPICS.DEVICE_TRACKER,
-      JSON.stringify({
-        status: "online",
-        message: "Device Status Tracker Online",
-        timestamp: new Date().toISOString(),
-      }),
+      JSON.stringify({ status: "online", message: "Device Status Tracker Online", timestamp: new Date().toISOString() }),
       { qos: 1, retain: true }
     );
 
-    // Subscribe to control topics for commands from frontend / controller
-    client.subscribe(
-      [TOPICS.LAMP_CONTROL, TOPICS.AC_CONTROL],
-      { qos: 2 },
-      (err) => {
-        if (err) {
-          console.error("[DEVICE-TRACKER] Subscribe error:", err.message);
-        } else {
-          console.log("[DEVICE-TRACKER] Subscribed to control topics");
-        }
-      }
-    );
-
-    // Publish initial retained status
+    client.subscribe([TOPICS.LAMP_CONTROL, TOPICS.AC_CONTROL], { qos: 2 });
     publishDeviceStatus(client);
   });
 
@@ -181,129 +170,89 @@ function startDeviceStatusTracker() {
 
       publishDeviceStatus(client);
     } catch (err) {
-      console.error("[DEVICE-TRACKER] Message parse error:", err.message);
+      console.error("[DEVICE-TRACKER] Parse error:", err.message);
     }
-  });
-
-  client.on("error", (err) => {
-    console.error("[DEVICE-TRACKER] Connection error:", err.message);
-  });
-
-  client.on("reconnect", () => {
-    console.log("[DEVICE-TRACKER] Attempting reconnection...");
   });
 
   return client;
 }
 
 function publishDeviceStatus(client) {
-  const lampPayload = JSON.stringify({
-    device: "Lamp",
-    status: lampStatus,
-    timestamp: new Date().toISOString(),
-  });
+  const lampPayload = JSON.stringify({ device: "Lamp", status: lampStatus, timestamp: new Date().toISOString() });
+  const acPayload = JSON.stringify({ device: "AC", status: acStatus, timestamp: new Date().toISOString() });
 
-  const acPayload = JSON.stringify({
-    device: "AC",
-    status: acStatus,
-    timestamp: new Date().toISOString(),
-  });
-
-  // RETAINED = true — new subscribers get last known status immediately
+  // [Feature 5] Retain: Keep the last known status on the broker
   client.publish(TOPICS.LAMP_STATUS, lampPayload, { qos: 1, retain: true });
   client.publish(TOPICS.AC_STATUS, acPayload, { qos: 1, retain: true });
-
-  console.log(
-    `[DEVICE-TRACKER] Published status -> Lamp: ${lampStatus} | AC: ${acStatus}`
-  );
+  console.log(`[DEVICE-TRACKER] Published status -> Lamp: ${lampStatus} | AC: ${acStatus}`);
 }
 
 // =============================================================
-// ROLE 3: Power Monitor
-// Publishes estimated power usage based on device status
-// Lamp = 60W, AC = 1500W when ON
+// ROLE 3: Power Monitor (Handles Request-Response)
 // =============================================================
 function startPowerMonitor() {
   const client = mqtt.connect(BROKER_URL, {
-    protocolVersion: 4,
+    protocolVersion: 5,
+    properties: { receiveMaximum: 10 }, // [Feature 10] Flow Control
     clientId: "power-monitor-" + Math.random().toString(16).slice(2, 8),
     clean: true,
-    connectTimeout: 10000,
-    reconnectPeriod: 5000,
     will: {
       topic: LWT_TOPICS.POWER_MONITOR,
-      payload: JSON.stringify({
-        status: "offline",
-        message: "Power Monitor Offline",
-        timestamp: new Date().toISOString(),
-      }),
+      payload: JSON.stringify({ status: "offline", message: "Power Monitor Offline", timestamp: new Date().toISOString() }),
       qos: 1,
-      retain: true,
+      retain: true, // [Feature 7] LWT
     },
   });
 
   client.on("connect", () => {
-    console.log("[POWER-MONITOR] Connected to broker");
-
-    // Publish online status
+    console.log("[POWER-MONITOR] Connected to broker (MQTT 5)");
     client.publish(
       LWT_TOPICS.POWER_MONITOR,
-      JSON.stringify({
-        status: "online",
-        message: "Power Monitor Online",
-        timestamp: new Date().toISOString(),
-      }),
+      JSON.stringify({ status: "online", message: "Power Monitor Online", timestamp: new Date().toISOString() }),
       { qos: 1, retain: true }
     );
 
-    // Subscribe to device status to compute power
-    client.subscribe(
-      [TOPICS.LAMP_STATUS, TOPICS.AC_STATUS],
-      { qos: 1 },
-      (err) => {
-        if (err) {
-          console.error("[POWER-MONITOR] Subscribe error:", err.message);
-        } else {
-          console.log("[POWER-MONITOR] Subscribed to device status topics");
-        }
-      }
-    );
-
-    // Also publish periodically (every 5s) for consistent dashboard updates
-    setInterval(() => {
-      publishPowerUsage(client);
-    }, 5000);
+    // Subscribe to device status AND Request topic
+    client.subscribe([TOPICS.LAMP_STATUS, TOPICS.AC_STATUS, TOPICS.POWER_REQUEST], { qos: 1 });
   });
 
-  client.on("message", (topic, message) => {
+  // Notice the 3rd parameter `packet` is used for MQTT 5 properties
+  client.on("message", (topic, message, packet) => {
     try {
-      const payload = JSON.parse(message.toString());
+      // [Feature 8] Request-Response Pattern
+      if (topic === TOPICS.POWER_REQUEST) {
+        console.log(`[POWER-MONITOR] Received Power Request`);
+        const responseTopic = packet.properties?.responseTopic;
+        const correlationData = packet.properties?.correlationData;
 
+        if (responseTopic) {
+          const powerPayload = getPowerPayload();
+          // Publish response directly to the requested topic
+          client.publish(responseTopic, powerPayload, {
+            qos: 1,
+            properties: { correlationData: correlationData } // Echo back the correlation data
+          });
+          console.log(`[POWER-MONITOR] Sent Power Response to ${responseTopic}`);
+        }
+        return;
+      }
+
+      const payload = JSON.parse(message.toString());
       if (topic === TOPICS.LAMP_STATUS) {
         lampStatus = payload.status;
       } else if (topic === TOPICS.AC_STATUS) {
         acStatus = payload.status;
       }
-
-      // Publish updated power immediately on status change
       publishPowerUsage(client);
     } catch (err) {
-      console.error("[POWER-MONITOR] Message parse error:", err.message);
+      console.error("[POWER-MONITOR] Error:", err.message);
     }
-  });
-
-  client.on("error", (err) => {
-    console.error("[POWER-MONITOR] Connection error:", err.message);
-  });
-
-  client.on("reconnect", () => {
-    console.log("[POWER-MONITOR] Attempting reconnection...");
   });
 
   return client;
 }
 
-function publishPowerUsage(client) {
+function getPowerPayload() {
   const LAMP_WATTS = 60;
   const AC_WATTS = 1500;
   const BASE_WATTS = 15; // standby power
@@ -312,7 +261,7 @@ function publishPowerUsage(client) {
   if (lampStatus === "ON") totalWatts += LAMP_WATTS;
   if (acStatus === "ON") totalWatts += AC_WATTS;
 
-  const payload = JSON.stringify({
+  return JSON.stringify({
     total: totalWatts,
     breakdown: {
       lamp: lampStatus === "ON" ? LAMP_WATTS : 0,
@@ -322,35 +271,24 @@ function publishPowerUsage(client) {
     unit: "W",
     timestamp: new Date().toISOString(),
   });
+}
 
-  client.publish(TOPICS.ENERGY, payload, { qos: 1 });
-  console.log(`[POWER-MONITOR] Total power: ${totalWatts}W`);
+function publishPowerUsage(client) {
+  client.publish(TOPICS.ENERGY, getPowerPayload(), { qos: 1 });
 }
 
 // =============================================================
 // Boot all publishers
 // =============================================================
 console.log("=".repeat(60));
-console.log("  MQTT Smart Campus — Publishers Starting...");
+console.log("  MQTT Smart Campus — Publishers Starting (v5)...");
 console.log("=".repeat(60));
 
 const sensorClient = startEnvironmentSensor();
 const trackerClient = startDeviceStatusTracker();
 const powerClient = startPowerMonitor();
 
-// Graceful shutdown
 process.on("SIGINT", () => {
-  console.log("\n[SYSTEM] Shutting down publishers...");
-  sensorClient.end();
-  trackerClient.end();
-  powerClient.end();
-  process.exit(0);
-});
-
-process.on("SIGTERM", () => {
-  console.log("\n[SYSTEM] Terminating publishers...");
-  sensorClient.end();
-  trackerClient.end();
-  powerClient.end();
+  sensorClient.end(); trackerClient.end(); powerClient.end();
   process.exit(0);
 });
