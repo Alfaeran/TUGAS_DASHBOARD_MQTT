@@ -1,4 +1,4 @@
-<img width="1905" height="1036" alt="Screenshot 2026-05-13 151041" src="https://github.com/user-attachments/assets/5c885c4f-85b9-447a-9924-05ea1cd014af" />1. Deskripsi Singkat Projek
+1. Deskripsi Singkat Projek
 Proyek ini adalah simulasi sistem Internet of Things (IoT) berbasis protokol MQTT untuk manajemen
 fasilitas ruangan (Facility Management Dashboard - Smart Campus). Sistem ini dibangun tanpa
 menggunakan perangkat keras fisik, melainkan menggunakan simulasi berbasis Node.js sebagai
