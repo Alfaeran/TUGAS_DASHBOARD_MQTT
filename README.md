@@ -4,6 +4,7 @@ fasilitas ruangan (Facility Management Dashboard - Smart Campus). Sistem ini dib
 menggunakan perangkat keras fisik, melainkan menggunakan simulasi berbasis Node.js sebagai
 publisher. Data yang dikirimkan mencakup suhu ruangan, intensitas cahaya, pelacakan status
 perangkat, dan konsumsi daya.
+
 Sistem ini menggunakan Mosquitto sebagai MQTT Broker. Data yang dipublikasikan kemudian diterima
 oleh dua subscriber utama: sebuah Controller Backend (Node.js) yang menjalankan logika otomasi, dan
 sebuah Frontend Dashboard (Vite/React) yang berfungsi untuk pemantauan secara real-time serta
@@ -15,12 +16,15 @@ Testament (LWT) telah diimplementasikan.
 Sistem ini terdiri dari tiga komponen utama yang saling terhubung melalui protokol MQTT (port 1883
 untuk koneksi lokal backend Node.js dan port WebSocket 9001 untuk koneksi web Frontend):
 MQTT Broker (Mosquitto): Pusat perutean pesan antar klien IoT.
+
 Publishers (Node.js): Terdapat simulasi untuk 4 entitas perangkat dengan role berbeda, yaitu:
 Environment Sensor, Device Tracker, Power Monitor, dan Auto Controller.
-Subscriber 1 (Controller - Node.js): Berfungsi memantau data sensor secara terus-menerus dan
+
+Subscriber 1 (Controller - Node.js) : Berfungsi memantau data sensor secara terus-menerus dan
 mengeksekusi aksi cerdas otomatis (misal: mengirimkan payload kontrol aktuator jika metrik
 lingkungan melewati batas tertentu).
-Subscriber 2 (Dashboard - Web Frontend): Bertindak ganda sebagai subscriber untuk
+
+Subscriber 2 (Dashboard - Web Frontend) : Bertindak ganda sebagai subscriber untuk
 memantau metrik lingkungan dan indikator health node, sekaligus sebagai publisher saat
 pengguna mengirimkan perintah manual.
 
